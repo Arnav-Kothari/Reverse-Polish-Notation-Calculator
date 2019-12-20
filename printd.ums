@@ -1,0 +1,92 @@
+// HW 8: asmcoding
+// By: Arnav Kothari (akotha02) and Frank Ma (jma07)
+// Date: 9/12/19
+
+// ------------------------Print Edge Cases Module --------------------- //
+// Prints an integer. See the function contract for printd for the use of//
+// registers in this module, since it is the only function here.         //
+//          - r5 serves as a temporary registers for the conditionals but//
+//            is also used as a general purpose register at times        //
+//          - r4 holds the integer to be printed, which is set in the    //
+//            calc40 module. We are not using the proposed calling       //
+//            convention since for this specific implementation, there   //
+//            is no need for pushing function arguments onto the call    //
+//            stack (since there is only one). It allows us to reduced   //
+//            the number of instructions needed.                         //
+// --------------------------------------------------------------------- //
+
+.temps r6, r7
+.zero r0
+
+// allocating space for the stack to hold the value(s) we are ultimately printing
+.section stk
+    .space 10
+    enddigitstack:
+
+.section text
+// --------------------------- Printd Function ------------------------- //
+// Checks different cases where printing may need to have specified      //
+// instructions, and goes to that case corresponding r3's value.         //
+// There are four cases, case_0 and case_0x80000000 returning back to    //
+// calc40.ums, print_pos prints out the entire stack, and case_neg prints//
+// the negative value of the integer it recieves.                        //
+// Argument: a 32 bit decimal value passed from the calc40 module        //
+// Result: prints out that decimal value                                 //
+// --------------------------------------------------------------------- //
+    printd:
+        // save the stack pointer of the value stack onto the call stack
+        push r3 on stack r2
+        // use r3 as the stack pointer for the digit stack
+        r3 := enddigitstack
+        // r5 is temporarily storing the largest negative number.
+        // This is to test an edge case; all other registers are being used,
+        // hence the use of r5
+        r5 := 0x80000000
+        
+        // 4 cases that require different printing methods
+        if (r4 == 0) goto case_0
+        if (r4 == r5) goto case_0x80000000 using r5
+        if (r4 >s 0) goto print_pos using r5
+        if (r4 <s 0) goto case_neg using r5
+
+        // print 0 in decimal, then return to calc40
+        case_0: 
+            output '0'
+            goto return_to_calc40
+
+        // print -2147483648 in decimal, then return to calc40
+        case_0x80000000: 
+            output "-2147483648"
+            goto return_to_calc40
+
+        // change r4 to a positive number, print out a negative sign
+        // and print the positive number with print_pos
+        case_neg:
+            r4 := ~r4                       // if our number is negative
+            r4 := r4 + 1                    // then make it positive and print
+            output '-'                           
+            goto print_pos
+        
+        // restore r3 to be value stack pointer and return to calc40
+        return_to_calc40:  
+            pop r3 off stack r2              
+            goto r1
+        
+        // prints the digit stack, uses r5 to hold the values on the stack
+        // returns to print_digitstack recursively until base case it hit
+        // then returns to calc40
+        print_digitstack: 
+            if (r3 == enddigitstack) goto return_to_calc40 using r5
+            pop r5 off stack r3
+            output r5 + 48
+            goto print_digitstack
+
+        // push digits onto the digit stack, uses r4 and r5 to manipulate 
+        // values that we are pushing on the stack and outputting, loops until
+        // the entire stack has been printed, then returns to print_digitstack
+        print_pos:      
+            r5 := r4 mod 10
+            r4 := r4 / 10
+            push r5 on stack r3
+            if (r4 == 0) goto print_digitstack using r5
+            goto print_pos

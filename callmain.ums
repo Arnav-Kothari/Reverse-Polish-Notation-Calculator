@@ -1,0 +1,15 @@
+// HW 8: asmcoding
+// By: Arnav Kothari (akotha02) and Frank Ma (jma07)
+// Date: 9/12/19
+
+// -------------------------- Calc40.ums module --------------------------- //
+// This file calls main and halts the program once main is done running     //
+// ------------------------------------------------------------------------ //
+
+.temps r6, r7
+.zero r0
+
+.section init
+    // calls main and sets r1 to the address of the following halt
+    goto main linking r1    
+    halt

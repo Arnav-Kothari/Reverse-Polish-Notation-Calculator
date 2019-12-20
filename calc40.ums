@@ -1,0 +1,435 @@
+// HW 8: asmcoding
+// By: Arnav Kothari (akotha02) and Frank Ma (jma07)
+// Date: 9/12/19
+
+// -------------------------- Calc40.ums module ------------------------ //
+// Contains umasm assembly that contains the main calculator loop and    //
+// each operation that it performs. Contains the initialization of the   //
+// value stack of the calculator. Contains the setup and implementation  //
+// of a jumptable that determines what operations to perform given user  //
+// inputs.                                                               //
+//      - r0 is the zero register and is guaranteed to hold the value 0. //
+//        It is set in the urt0 module.                                  //
+//      - r1 holds the return address of a function when one is called   //
+//        unless otherwise specified in the function contracts below.    //
+//      - r2 is the stack pointer of the call stack and is guaranteed    //
+//        to hold the address of the top of the call stack.              //
+//      - r3 is the stack pointer of the value stack and hold the        //
+//        address of the top of the call stack, unless specified         //
+//        otherwise (only in print_stack)                                //
+//      - r4 is a general purpose register. It is also sometimes used to //
+//        pass an argument to a "function", such as in the case of       //
+//        printd. This choice was made rather than passing arguments on  //
+//        the call stack since it requires less operations.              //
+//      - r5 is a general purpose register. It is also used as a third   //
+//        temp register when one is needed, mostly for conditional       //
+//        macros.                                                        //
+//      - r6 and r7 are temp registers that are never used explicitly.   //
+// --------------------------------------------------------------------- //
+
+.temps r6, r7
+.zero r0
+
+// allocate a value stack that can hold 20000 32 bit integers and a jumptable
+// that can hold 256 possible characters
+.section data
+    .space 20000
+    endvaluestack:
+
+    .space 256
+    endjumptable:
+
+// setup jumptable and the value stack pointer
+.section init
+    // r3 is the designated register for the value stack
+    r3 := endvaluestack
+
+// -------------------------- Jumptable Setup -------------------------- //
+// Sets up the jumptable that determines the operation to perform when   //
+// each of the 256 ASCII characters are read. In the setup, all          //
+// characters in the table are initialized to unknown_character in a     //
+// loop, where r4 is used as the address in segment 0 of each jumptable  //
+// entry.                                                                //
+// --------------------------------------------------------------------- //
+
+    r4 := endjumptable
+    jumptable_setup:      // loop that sets every entry to unknown_character
+        m[r0][r4] := unknown_character
+        r4 := r4 - 1
+        if (r4 != 255) goto jumptable_setup using r5
+
+    // setup all valid operations
+    m[r0][endjumptable - '0'] := push_val
+    m[r0][endjumptable - '1'] := push_val
+    m[r0][endjumptable - '2'] := push_val
+    m[r0][endjumptable - '3'] := push_val
+    m[r0][endjumptable - '4'] := push_val
+    m[r0][endjumptable - '5'] := push_val
+    m[r0][endjumptable - '6'] := push_val
+    m[r0][endjumptable - '7'] := push_val
+    m[r0][endjumptable - '8'] := push_val
+    m[r0][endjumptable - '9'] := push_val
+
+    m[r0][endjumptable - ' '] := waiting
+    m[r0][endjumptable - '\n'] := print_stack
+
+    m[r0][endjumptable - '+'] := add
+    m[r0][endjumptable - '-'] := sub
+    m[r0][endjumptable - '*'] := mul
+    m[r0][endjumptable - '/'] := div
+    m[r0][endjumptable - '|'] := or
+    m[r0][endjumptable - '&'] := and
+    m[r0][endjumptable - 'c'] := neg
+    m[r0][endjumptable - '~'] := not
+    m[r0][endjumptable - 's'] := swap
+    m[r0][endjumptable - 'd'] := dup
+    m[r0][endjumptable - 'p'] := pop_val
+    m[r0][endjumptable - 'z'] := rem
+
+.section text
+    
+// ----------------------- Main Calculator Loop ------------------------ //
+// The main calculator loop for the RPN calculator. It reads a character //
+// from standard in, and goes to the according operation in the          //
+// jumptable. If that operation is not specified in the jumptable, it    //
+// prints out an error message. If there is a number entered immediately //
+// following another, do some math and store update the value stack with //
+// the actual number. Main has no arguments or return values.            //
+//          - r3 holds the address of the number of the stack that is    //
+//            currently being print_stack_end                            //
+//          - r4 holds a character read from standard in                 //
+// --------------------------------------------------------------------- //
+    main:
+        push r1 on stack r2 // save return address of main
+
+        waiting:
+            r4 := input()   // read one character from stdin
+		waiting_with_character:
+            if (r4 != -1) goto waiting_with_character_continue using r5
+            pop r1 off stack r2         // if EOF, return
+            goto r1
+        waiting_with_character_continue:
+            r5 := endjumptable - r4    // find and goto the jumptable entry
+            goto m[r0][r5]
+        entering:
+            r4 := input()
+
+            // if the input is not a number, then go to waiting_with_character
+            // to determine the correct operation to perform
+            if (r4 <s 48) goto waiting_with_character using r5
+            if (r4 >s 57) goto waiting_with_character using r5
+
+            // otherwise, get the number at the top of the value stack, and 
+            // calculate the actual integer to be put onto the value stack, 
+            // and repeat until we see a non-numeral
+            pop r5 off stack r3
+            r5 := 10 * r5
+            r5 := r4 + r5
+            r5 := r5 - 48
+            push r5 on stack r3     // push new number onto value stack
+            goto entering           // loop back up to the top
+
+        pop r1 off stack r2         // set r1 to return address of main
+        goto r1                     // return to callmain
+
+
+// ------------------------ Push Value Procedure ----------------------- //
+// Push the value stored in r4 onto the value stack.                     //
+//          - r4 holds the user input and is directly set in main above. //
+//            (rather than pushing it onto the call stack for it to      //
+//            act as a function argument).                               //
+// Argument: an ASCII character (0 to 255)                               //
+// Result: push the decimal of that ASCII onto the value stack           //
+// --------------------------------------------------------------------- //
+    push_val:
+        r4 := r4 - 48
+        push r4 on stack r3
+        goto entering
+
+// ----------------------- Print Stack Procedure ----------------------- //
+// The print_stack operation prints the contents of the value stack,     //
+// top to bottom. It works in case of an empty stack. This is only       //
+// called when the calculator encounter a \n character.                  //
+//          - r3 holds the address of the number of the stack that is    //
+//            currently being print_stack_end                            //
+//          - r4 holds the number that we are trying to print, which     //
+//            later be used by the printd module                         //
+// Arguments: N/A, 32 bit decimal values are popped off the value stack  //
+// Results: prints the decimal values of all elements on the stack,      //
+//          using the printd module                                      //
+// --------------------------------------------------------------------- //
+    print_stack:
+        // saves the address of the top of the value stack
+        push r3 on stack r2
+        print_stack_loop:
+            if (r3 == endvaluestack) goto print_stack_end using r5
+            r4 := m[r0][r3]       // r4 gets the number we are trying to print
+            output ">>> "
+            goto printd linking r1
+            output "\n"
+            r3 := r3 + 1
+            goto print_stack_loop
+        print_stack_end:
+            pop r3 off stack r2     // restores top of value stack into r3
+            goto waiting
+
+// ---------------- Arithmetic and Bitwise Procedures ------------------ //
+// All arithmetic and bitwise operations first checks if the value stack //
+// has enough elements, pop them off the value stack, performs the       //
+// operations, and push the result onto the value stack.                 //
+//      In the checking phase:                                           //
+//          - r5 holds how many elements are available on the value stack//
+//          - r4 holds how many elements are needed for that operation   //
+//          - r5 also serves as a temporary register for conditionals    //
+//      In the calculation phase:                                        //
+//          - r5 holds the first argument (x)                            //
+//          - r4 holds the second argument, if applicable (y)            //
+//          - r1 holds the result of the operation                       //
+// Arguments: N/A, 32 bit decimal values are popped off the value stack  //
+// Results: push the result of the arithmetic/bitwise procedure onto the //
+//          value stack, which are also 32 bit decimal values            //
+// --------------------------------------------------------------------- //
+    
+    // pop y from the value stack r3, pop x from the value stack , then push
+    // x + y to r1, and finally return to waiting
+    add:
+        // check if the value stack has enough elements
+        r5 := endvaluestack - r3         
+        r4 := 2                          
+        if (r5 <s r4) goto stack_underflow using r5
+
+        pop r4 off stack r3             // pop y from the value stack
+        pop r5 off stack r3             // pop x from the value stack
+        r1 := r5 + r4                   // load result in r1
+        push r1 on stack r3
+        goto waiting
+
+    // pop y from the value stack r3, pop x from the value stack , then push
+    // x - y to r1, and finally return to waiting
+    sub:
+        // check if the value stack has enough elements
+        r5 := endvaluestack - r3         
+        r4 := 2                          
+        if (r5 <s r4) goto stack_underflow using r5
+
+        pop r4 off stack r3             // pop y from the value stack
+        pop r5 off stack r3             // pop x from the value stack
+        r1 := r5 - r4                   // load result in r1
+        push r1 on stack r3
+        goto waiting
+
+    // pop y from the value stack r3, pop x from the value stack , then push
+    // x * y to r1, and finally return to waiting
+    mul:
+        // check if the value stack has enough elements
+        r5 := endvaluestack - r3         
+        r4 := 2                          
+        if (r5 <s r4) goto stack_underflow using r5
+
+        pop r4 off stack r3             // pop y from the value stack
+        pop r5 off stack r3             // pop x from the value stack
+        r1 := r5 * r4                   // load result in r1
+        push r1 on stack r3
+        goto waiting  
+
+    // pop y from the value stack r3, then pop x from the value stack r3, 
+    // then push x / y to r1. If y is 0, print an error message and leave the
+    // stack unchanged; no matter the edge case, return to waiting.
+    div:
+        // check if the value stack has enough elements
+        r5 := endvaluestack - r3         
+        r4 := 2                          
+        if (r5 <s r4) goto stack_underflow using r5
+
+        pop r4 off stack r3             // pop y from the value stack
+        pop r5 off stack r3             // pop x from the value stack
+        
+        // special case if denominator is 0
+        if (r4 == 0) goto zero_div_case using r1
+        
+        // case if division has a negative numerator number
+        if (r5 <s 0) goto x_less_than_0 using r1
+        
+        // case if division has a negative denominator number
+        if (r4 <s 0) goto y_less_than_0 using r1 
+        
+        // case where both numerator and denominator are positive
+        r1 := r5 / r4                   
+        push r1 on stack r3
+        goto waiting
+        
+        // special case if denominator is 0
+        zero_div_case:
+            output "Division by zero\n"
+            push r5 on stack r3
+            push r4 on stack r3
+            goto waiting
+        
+        // case if division has a negative numerator number
+        x_less_than_0:
+            if (r4 <s 0) goto x_y_less_than_0 using r1
+            r5 := -r5
+            r1 := r5 / r4
+            r1 := -r1
+            push r1 on stack r3
+            goto waiting
+        
+        // case if division has negative denominator and numerators
+        x_y_less_than_0:
+            r4 := -r4
+            r5 := -r5
+            r1 := r5 / r4
+            push r1 on stack r3
+            goto waiting
+        
+        // case if division has a negative denominator number
+        y_less_than_0:
+            r4 := -r4
+            r1 := r5 / r4
+            r1 := -r1
+            push r1 on stack r3
+            goto waiting
+    
+    // pop y from the value stack r3, the pop x from the value stack r3, 
+    // then push x v y to r1, where v stands for bitwise or, return to waiting
+    or:
+        // check if the value stack has enough elements
+        r5 := endvaluestack - r3         
+        r4 := 2                          
+        if (r5 <s r4) goto stack_underflow using r5
+
+        pop r4 off stack r3             // pop y from the value stack
+        pop r5 off stack r3             // pop x from the value stack
+        r1 := r5 | r4                   // load result in r1
+        push r1 on stack r3
+        goto waiting
+
+    // pop y from the value stack r3, the pop x from the value stack r3, 
+    // then push x ^ y to r1, where ^ stands for bitwise and, return to waiting
+    and:
+        // check if the value stack has enough elements
+        r5 := endvaluestack - r3         
+        r4 := 2                          
+        if (r5 <s r4) goto stack_underflow using r5
+
+        pop r4 off stack r3             // pop y from the value stack
+        pop r5 off stack r3             // pop x from the value stack
+        r1 := r5 & r4                   // load result in r1
+        push r1 on stack r3
+        goto waiting
+
+    // (Change sign.) Pop x from the value stack r3, then store then negative
+    // x in r1 and return to waiting
+    neg:
+        // check if the value stack has enough elements
+        r5 := endvaluestack - r3         
+        r4 := 1                          
+        if (r5 <s r4) goto stack_underflow using r5
+
+        pop r5 off stack r3             // pop x from the value stack
+        r1 := -r5                       // load result in r1
+        push r1 on stack r3
+        goto waiting
+
+    // pop x from the value stack r3, then push ~x, stored in r1, where ~ 
+    // stands for bitwise complement, return to waiting
+    not:
+        // check if the value stack has enough elements
+        r5 := endvaluestack - r3         
+        r4 := 1                          
+        if (r5 <s r4) goto stack_underflow using r5
+
+        pop r5 off stack r3             // pop x from the value stack
+        r1 := ~r5                       // load result in r1
+        push r1 on stack r3
+        goto waiting
+
+// ---------------- Value Stack Manipulation Procedures ---------------- //
+// All value stack manipulation operations first checks if the value     //
+// stack has enough elements, pop them off the value stack, and push     //
+// them back onto the stack in a certain order depending on the          //
+// operation.                                                            //
+//      In the checking phase:                                           //
+//          - r5 holds how many elements are available on the value stack//
+//          - r5 also serves as a temporary register for the conditional //
+//          - r4 holds how many elements are needed for that operation   //
+//      In the stack manipulation phase:                                 //
+//          - r5 holds the first argument (x)                            //
+//          - r4 holds the second argument, if applicable (y)            //
+// Arguments: N/A, 32 bit decimal values are popped off the value stack  //
+// Results: push the result of the stack manipulation procedure onto the //
+//          value stack, which are also 32 bit decimal values            //
+// --------------------------------------------------------------------- //
+    // swap the two values on top of the value stack r3 (exchange x and y)
+    // push them back onto the stack r3 and return to waiting
+    swap:
+        // check if the value stack has enough elements
+        r5 := endvaluestack - r3         
+        r4 := 2                          
+        if (r5 <s r4) goto stack_underflow using r5
+
+        pop r4 off stack r3             // pop y from the value stack
+        pop r5 off stack r3             // pop x from the value stack
+        push r4 on stack r3             // push y on the value stack
+        push r5 on stack r3             // push x on the value stack
+        goto waiting  
+
+    // duplicate the value on top of the value stack r3, 
+    // push them back onto the stack r3 and return to waiting 
+    dup:
+        // check if the value stack has enough elements
+        r5 := endvaluestack - r3         
+        r4 := 1                          
+        if (r5 <s r4) goto stack_underflow using r5
+        
+        pop r5 off stack r3             // pop x from the value stack
+        push r5 on stack r3             // push x on the value stack
+        push r5 on stack r3             // push x on the value stack
+        goto waiting 
+
+    // pop a value off the value stack r3 and discard it
+    // push them back onto the stack r3 and return to waiting
+    pop_val:
+        // check if the value stack has enough elements
+        r5 := endvaluestack - r3         
+        r4 := 1                          
+        if (r5 <s r4) goto stack_underflow using r5
+
+        pop stack r3          // pop and discard a value from the value stack
+        goto waiting
+
+    // remove all values from the value stack r3 (zero stack)
+    // do this recursively so return to rem until stack r3 is empty
+    // then return to waiting
+    rem:
+        // no need to check if the are any values on the stack
+        if (r3 == endvaluestack) goto waiting using r5 //return
+        pop stack r3
+        goto rem
+
+    unknown_character:
+        output "Unknown character '"
+        output r4
+        output "'\n"
+        goto waiting
+
+// ------------------- Stack Underflow Error Message ------------------- //
+// Prints an error message if the stack does not have enough elements    //
+// for one of the above arithmetic, bitwise, or stack manipulation       //
+// operations to be performed.                                           //
+//          - r4 holds the number of arguments required by the given     //
+//            operation, and is directly set in each of the operations   //
+//            above (rather than pushing it onto the call stack for it   //
+//            to act as a function argument).                            //
+// Arguments: the number of elements that a given procedure needs        //
+// Results: prints out an error message to the stdout                    //
+// --------------------------------------------------------------------- //
+    stack_underflow:
+        output "Stack underflow---expected at least "
+        output r4 + 48
+        if (r4 >s 1) goto plural using r5
+        output " element\n"
+        goto waiting
+        plural:
+            output " elements\n"
+            goto waiting

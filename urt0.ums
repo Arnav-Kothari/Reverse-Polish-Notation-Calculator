@@ -1,0 +1,24 @@
+// HW 8: asmcoding
+// By: Arnav Kothari (akotha02) and Frank Ma (jma07)
+// Date: 9/12/19
+
+// -------------------------- urt0.ums module ----------------------------- //
+// This module sets up the initial call stack and sets the values of r0     //
+// (zero register) and r2 (call stack pointer). It is similar in concept to //
+// crt0 in c.                                                               //
+// ------------------------------------------------------------------------ //
+
+.temps r6, r7
+.zero r0
+
+// setup the call stack, which does not need to be large since most of the
+// function calls passes arguments via a register rather than the call stack
+.section stk
+    .space 1000               
+    endstack:
+
+.section init
+    // sets the base calling conventions, r0 to 0 and r2 to stack ptr
+    start:
+        r0 := 0             // r0 is always going to be 0
+        r2 := endstack      // r2 is the stack pointer
